@@ -65,12 +65,16 @@ jobs:
         path: app/build/outputs/apk/release/app-release-signed.apk
         retention-days: 90
     
+    - name: Get version
+      id: version
+      run: echo "VERSION=v1.0.${{ github.run_number }}" >> $GITHUB_OUTPUT
+    
     - name: Create Release
       if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-      uses: softprops/action-gh-release@v1
+      uses: ncipollo/release-action@v1
       with:
-        tag_name: v1.0.${{ github.run_number }}
-        name: Release v1.0.${{ github.run_number }}
+        tag: ${{ steps.version.outputs.VERSION }}
+        name: Release ${{ steps.version.outputs.VERSION }}
         body: |
           ## MXW01 Printer App
           
@@ -95,10 +99,11 @@ jobs:
           - Improved Bluetooth stability
           - Cat-Printer inspired implementation
           - Better error handling
-        files: |
-          app/build/outputs/apk/debug/app-debug.apk
-          app/build/outputs/apk/release/app-release-signed.apk
+          
+          ### Download
+          - **Debug APK**: For testing and development
+          - **Release APK**: Optimized for production use
+        artifacts: "app/build/outputs/apk/debug/app-debug.apk,app/build/outputs/apk/release/app-release-signed.apk"
         draft: false
         prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        token: ${{ secrets.GITHUB_TOKEN }}
