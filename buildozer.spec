@@ -1,26 +1,23 @@
 [app]
 title = MXW01 Printer
 package.name = mxw01printer
-package.domain = com.mxw
+package.domain = org.mxw
 
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
 
 version = 1.0
 
-requirements = python3,kivy,pillow,android,pyjnius
+requirements = python3,kivy,pillow,bleak,bleak-winrt,async_timeout
 
 orientation = portrait
 fullscreen = 0
 
-android.permissions = BLUETOOTH,BLUETOOTH_ADMIN,ACCESS_FINE_LOCATION,ACCESS_COARSE_LOCATION,INTERNET
+android.permissions = BLUETOOTH,BLUETOOTH_ADMIN,BLUETOOTH_SCAN,BLUETOOTH_CONNECT,ACCESS_FINE_LOCATION,ACCESS_COARSE_LOCATION
 android.api = 31
-android.minapi = 21
+android.minapi = 26
 android.ndk = 25b
 android.accept_sdk_license = True
-android.archs = arm64-v8a
-
-p4a.branch = master
 
 [buildozer]
 log_level = 2
