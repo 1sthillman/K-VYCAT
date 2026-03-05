@@ -12,15 +12,24 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Build with Buildozer
-      uses: ArtemSBulgakov/buildozer-action@v1
-      id: buildozer
+    - name: Set up Python
+      uses: actions/setup-python@v5
       with:
-        workdir: .
-        buildozer_version: stable
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y git zip unzip openjdk-17-jdk wget
+        pip install --upgrade pip
+        pip install buildozer cython
+    
+    - name: Build with Buildozer
+      run: |
+        buildozer android debug
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
         name: mxw01-printer-apk
-        path: .buildozer/android/platform/build-arm64-v8a_armeabi-v7a/dists/mxw01printer/build/outputs/apk/debug/*.apk
+        path: bin/*.apk
