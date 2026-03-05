@@ -1,0 +1,104 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: gradle
+    
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+    
+    - name: Build Debug APK
+      run: ./gradlew assembleDebug --stacktrace
+    
+    - name: Build Release APK
+      run: ./gradlew assembleRelease --stacktrace
+    
+    - name: Sign Release APK
+      if: success()
+      run: |
+        # Create keystore (for demo - use secrets in production)
+        keytool -genkey -v -keystore release.keystore -alias mxwprinter \
+          -keyalg RSA -keysize 2048 -validity 10000 \
+          -storepass android -keypass android \
+          -dname "CN=MXW Printer, OU=Dev, O=MXW, L=City, S=State, C=US"
+        
+        # Sign APK
+        $ANDROID_HOME/build-tools/34.0.0/apksigner sign \
+          --ks release.keystore \
+          --ks-key-alias mxwprinter \
+          --ks-pass pass:android \
+          --key-pass pass:android \
+          --out app/build/outputs/apk/release/app-release-signed.apk \
+          app/build/outputs/apk/release/app-release-unsigned.apk
+    
+    - name: Upload Debug APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: mxw-printer-debug
+        path: app/build/outputs/apk/debug/app-debug.apk
+        retention-days: 30
+    
+    - name: Upload Release APK
+      uses: actions/upload-artifact@v4
+      if: success()
+      with:
+        name: mxw-printer-release
+        path: app/build/outputs/apk/release/app-release-signed.apk
+        retention-days: 90
+    
+    - name: Create Release
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v1.0.${{ github.run_number }}
+        name: Release v1.0.${{ github.run_number }}
+        body: |
+          ## MXW01 Printer App
+          
+          ### Features
+          - ✅ Bluetooth thermal printer support
+          - ✅ Text and image printing
+          - ✅ Modern Material Design 3 UI
+          - ✅ Multiple paper sizes (58mm, 80mm)
+          - ✅ Banner mode
+          - ✅ Auto-reconnect
+          
+          ### Installation
+          1. Download `app-release-signed.apk`
+          2. Enable "Install from Unknown Sources"
+          3. Install APK
+          4. Grant Bluetooth permissions
+          
+          ### Supported Printers
+          - MXW01 (48:0F:57:3E:60:77)
+          
+          ### Changes
+          - Improved Bluetooth stability
+          - Cat-Printer inspired implementation
+          - Better error handling
+        files: |
+          app/build/outputs/apk/debug/app-debug.apk
+          app/build/outputs/apk/release/app-release-signed.apk
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
