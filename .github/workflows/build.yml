@@ -1,35 +1,92 @@
-name: Build APK
+name: Build Python APK
 
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
     
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
     
-    - name: Install dependencies
+    - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y git zip unzip openjdk-17-jdk wget
+        sudo apt-get install -y \
+          git zip unzip openjdk-17-jdk wget \
+          build-essential libssl-dev libffi-dev \
+          python3-dev libltdl-dev
+    
+    - name: Install Buildozer
+      run: |
         pip install --upgrade pip
         pip install buildozer cython
     
-    - name: Build with Buildozer
+    - name: Build APK with Buildozer
       run: |
         buildozer android debug
+      env:
+        ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        ANDROID_HOME: /usr/local/lib/android/sdk
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: mxw01-printer-apk
+        name: mxw01-printer-python-apk
         path: bin/*.apk
+        retention-days: 90
+    
+    - name: Get version
+      id: version
+      run: echo "VERSION=v1.0.${{ github.run_number }}" >> $GITHUB_OUTPUT
+    
+    - name: Create Release
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: ncipollo/release-action@v1
+      with:
+        tag: ${{ steps.version.outputs.VERSION }}
+        name: Python Release ${{ steps.version.outputs.VERSION }}
+        body: |
+          ## MXW01 Printer - Python/Kivy Version
+          
+          ### Features
+          - ✅ Python Bleak library (PROVEN to work)
+          - ✅ Same code as desktop printer_app.py
+          - ✅ Kivy UI for Android
+          - ✅ Bluetooth thermal printing
+          
+          ### Installation
+          1. Download `mxw01printer-*.apk`
+          2. Enable "Install from Unknown Sources"
+          3. Install APK
+          4. Grant Bluetooth and Location permissions
+          
+          ### Why Python?
+          - Desktop Python app WORKS perfectly
+          - Bleak library handles Bluetooth correctly
+          - No Kotlin/Java Bluetooth issues
+          
+          ### Supported Printers
+          - MXW01 (48:0F:57:3E:60:77)
+          
+          ### Technical
+          - Python 3.11
+          - Kivy framework
+          - Bleak Bluetooth library
+          - Buildozer APK builder
+        artifacts: "bin/*.apk"
+        draft: false
+        prerelease: false
+        token: ${{ secrets.GITHUB_TOKEN }}

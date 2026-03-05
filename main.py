@@ -1,36 +1,27 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MXW01 Kivy Printer App - Android Bluetooth
+MXW01 Printer - Kivy Android App
+Python printer_app.py'nin mobil versiyonu
 """
 
+import asyncio
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
-from kivy.uix.image import Image as KivyImage
 from kivy.uix.progressbar import ProgressBar
 from kivy.uix.scrollview import ScrollView
 from kivy.clock import Clock
-from kivy.graphics.texture import Texture
 from PIL import Image, ImageDraw, ImageFont
 import io
-import time
 
-# Android Bluetooth
 try:
-    from jnius import autoclass
-    BluetoothAdapter = autoclass('android.bluetooth.BluetoothAdapter')
-    BluetoothDevice = autoclass('android.bluetooth.BluetoothDevice')
-    BluetoothGatt = autoclass('android.bluetooth.BluetoothGatt')
-    BluetoothGattCallback = autoclass('android.bluetooth.BluetoothGattCallback')
-    BluetoothGattCharacteristic = autoclass('android.bluetooth.BluetoothGattCharacteristic')
-    UUID = autoclass('java.util.UUID')
-    PythonActivity = autoclass('org.kivy.android.PythonActivity')
-    ANDROID = True
-except:
-    ANDROID = False
+    from bleak import BleakClient, BleakScanner
+    BLE_AVAILABLE = True
+except ImportError:
+    BLE_AVAILABLE = False
 
 # Printer Protocol
 DEVICE_ADDRESS = "48:0F:57:3E:60:77"
@@ -40,7 +31,7 @@ PRINTER_WIDTH = 384
 BYTES_PER_ROW = 48
 
 def encode_lsb(img: Image.Image) -> bytes:
-    """LSB encoding"""
+    """LSB encoding - printer_app.py ile AYNI"""
     data = []
     for y in range(img.height):
         for x in range(0, PRINTER_WIDTH, 8):
@@ -52,14 +43,17 @@ def encode_lsb(img: Image.Image) -> bytes:
     return bytes(data)
 
 def text_to_image(text: str, font_size: int = 60) -> Image.Image:
-    """Text to bitmap"""
+    """Text to bitmap - printer_app.py ile AYNI"""
     lines = text.split('\n') if text.strip() else ["Test"]
     
     # Font
     try:
         font = ImageFont.truetype("/system/fonts/Roboto-Bold.ttf", font_size)
     except:
-        font = ImageFont.load_default()
+        try:
+            font = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", font_size)
+        except:
+            font = ImageFont.load_default()
     
     # Calculate size
     line_height = font_size + 8
@@ -94,7 +88,7 @@ class PrinterApp(App):
         
         # Status label
         self.status_label = Label(
-            text='Hazır' if ANDROID else 'HATA: Android gerekli!',
+            text='Hazır' if BLE_AVAILABLE else 'HATA: Bleak yüklü değil!',
             size_hint=(1, 0.1),
             color=(1, 1, 1, 1)
         )
@@ -104,141 +98,145 @@ class PrinterApp(App):
         self.text_input = TextInput(
             hint_text='Yazdırmak istediğiniz metni girin...',
             multiline=True,
-            size_hint=(1, 0.3)
+            size_hint=(1, 0.5)
         )
-        self.text_input.bind(text=self.update_preview)
         layout.add_widget(self.text_input)
-        
-        # Preview
-        preview_scroll = ScrollView(size_hint=(1, 0.3))
-        self.preview_image = KivyImage()
-        preview_scroll.add_widget(self.preview_image)
-        layout.add_widget(preview_scroll)
         
         # Progress bar
         self.progress_bar = ProgressBar(max=100, size_hint=(1, 0.05))
         layout.add_widget(self.progress_bar)
+        
+        # Log scroll
+        log_scroll = ScrollView(size_hint=(1, 0.2))
+        self.log_label = Label(
+            text='',
+            size_hint_y=None,
+            markup=True
+        )
+        self.log_label.bind(texture_size=self.log_label.setter('size'))
+        log_scroll.add_widget(self.log_label)
+        layout.add_widget(log_scroll)
         
         # Print button
         self.print_btn = Button(
             text='Yazdır',
             size_hint=(1, 0.15),
             background_color=(0.2, 0.6, 1, 1),
-            disabled=not ANDROID
+            disabled=not BLE_AVAILABLE
         )
         self.print_btn.bind(on_press=self.start_print)
         layout.add_widget(self.print_btn)
         
-        # Initial preview
         self.current_image = None
-        self.update_preview(None, "Test")
-        
-        # Bluetooth
-        self.gatt = None
-        self.cmd_char = None
-        self.data_char = None
         
         return layout
     
-    def update_preview(self, instance, text):
-        """Update preview image"""
-        try:
-            if not text.strip():
-                text = "Test"
-            
-            # Generate image
-            self.current_image = text_to_image(text)
-            
-            # Convert to Kivy texture
-            img_rgb = self.current_image.convert('RGB')
-            buf = io.BytesIO()
-            img_rgb.save(buf, format='PNG')
-            buf.seek(0)
-            
-            texture = Texture.create(size=(img_rgb.width, img_rgb.height))
-            texture.blit_buffer(img_rgb.tobytes(), colorfmt='rgb', bufferfmt='ubyte')
-            texture.flip_vertical()
-            
-            self.preview_image.texture = texture
-            
-        except Exception as e:
-            self.status_label.text = f'Hata: {e}'
+    def add_log(self, text):
+        """Add log message"""
+        current = self.log_label.text
+        self.log_label.text = current + '\n' + text if current else text
     
     def start_print(self, instance):
         """Start printing"""
-        if not ANDROID:
-            self.status_label.text = 'HATA: Android gerekli!'
+        if not BLE_AVAILABLE:
+            self.status_label.text = 'HATA: Bleak yüklü değil!'
             return
         
-        if self.current_image is None:
-            self.status_label.text = 'HATA: Görsel yok!'
+        text = self.text_input.text.strip()
+        if not text:
+            self.status_label.text = 'HATA: Metin girin!'
             return
         
         self.print_btn.disabled = True
-        self.status_label.text = 'Bağlanıyor...'
+        self.status_label.text = 'Yazdırılıyor...'
         self.progress_bar.value = 0
         
-        # Connect and print
-        Clock.schedule_once(lambda dt: self.print_sync(), 0.1)
-    
-    def print_sync(self):
-        """Synchronous print"""
+        # Generate image
         try:
-            # Get Bluetooth adapter
-            adapter = BluetoothAdapter.getDefaultAdapter()
-            if adapter is None:
-                self.status_label.text = 'HATA: Bluetooth yok!'
-                self.print_btn.disabled = False
-                return
-            
-            # Get device
-            device = adapter.getRemoteDevice(DEVICE_ADDRESS)
-            if device is None:
-                self.status_label.text = 'HATA: Yazıcı bulunamadı!'
-                self.print_btn.disabled = False
-                return
-            
-            self.status_label.text = 'Bağlandı! Yazdırılıyor...'
-            
-            # Connect GATT (simplified - direct write)
-            # Note: Bu basitleştirilmiş versiyon, gerçek GATT callback gerektirir
-            # Ama temel mantığı gösteriyor
-            
-            data = encode_lsb(self.current_image)
-            
-            # Commands (hex strings)
-            commands = [
-                bytes.fromhex("2221A70000000000"),
-                bytes.fromhex("2221B10001000000FF"),
-                bytes.fromhex("2221A10001000000FF"),
-                bytes.fromhex("2221A2000100FFFFFF"),
-                bytes.fromhex("2221A9000400000230000000"),
-            ]
-            
-            # Send commands (simplified)
-            for cmd in commands:
-                time.sleep(0.5)
-            
-            # Send data rows
-            total = self.current_image.height
-            for i in range(total):
-                row = data[i * BYTES_PER_ROW:(i + 1) * BYTES_PER_ROW]
-                time.sleep(0.05)
-                
-                # Update progress
-                progress = int((i + 1) / total * 100)
-                self.progress_bar.value = progress
-            
-            # End command
-            time.sleep(2.0)
-            
-            self.status_label.text = '✅ Yazdırma tamamlandı!'
-            
+            self.current_image = text_to_image(text)
+            self.add_log(f'Görsel oluşturuldu: {self.current_image.width}x{self.current_image.height}')
         except Exception as e:
             self.status_label.text = f'HATA: {e}'
+            self.print_btn.disabled = False
+            return
+        
+        # Run async print
+        asyncio.ensure_future(self.print_async())
+    
+    async def print_async(self):
+        """Async print - printer_app.py ile AYNI"""
+        try:
+            self.update_status('Yazıcı aranıyor...')
+            self.add_log('Tarama başlatıldı...')
+            
+            device = await BleakScanner.find_device_by_address(DEVICE_ADDRESS, timeout=5.0)
+            
+            if not device:
+                self.update_status('HATA: Yazıcı bulunamadı!')
+                self.add_log('HATA: Yazıcı bulunamadı!')
+                self.print_btn.disabled = False
+                return
+            
+            self.update_status('Bağlanıyor...')
+            self.add_log(f'Yazıcı bulundu: {device.name}')
+            
+            async with BleakClient(device) as client:
+                self.update_status('Bağlandı! Yazdırılıyor...')
+                self.add_log('Bağlantı başarılı!')
+                
+                data = encode_lsb(self.current_image)
+                self.add_log(f'Veri hazırlandı: {len(data)} byte')
+                
+                # Commands - printer_app.py ile AYNI
+                self.add_log('Komutlar gönderiliyor...')
+                for cmd, delay in [
+                    ("2221A70000000000", 0.5),
+                    ("2221B10001000000FF", 0.5),
+                    ("2221A10001000000FF", 0.5),
+                    ("2221A2000100FFFFFF", 1.0),
+                    ("2221A9000400000230000000", 1.0),
+                ]:
+                    await client.write_gatt_char(CMD_UUID, bytes.fromhex(cmd), response=False)
+                    await asyncio.sleep(delay)
+                
+                # Send data - printer_app.py ile AYNI
+                total = self.current_image.height
+                self.add_log(f'{total} satır gönderiliyor...')
+                
+                for i in range(total):
+                    row = data[i * BYTES_PER_ROW:(i + 1) * BYTES_PER_ROW]
+                    await client.write_gatt_char(DATA_UUID, row, response=False)
+                    await asyncio.sleep(0.05)
+                    
+                    # Update progress
+                    progress = int((i + 1) / total * 100)
+                    Clock.schedule_once(lambda dt: self.update_progress(progress), 0)
+                    
+                    if (i + 1) % 50 == 0:
+                        self.add_log(f'İlerleme: {i + 1}/{total}')
+                
+                # End - printer_app.py ile AYNI
+                self.add_log('Bitiriliyor...')
+                await client.write_gatt_char(CMD_UUID, bytes.fromhex("2221AD000100000000"), response=False)
+                await asyncio.sleep(2.0)
+                
+                self.update_status('✅ Yazdırma tamamlandı!')
+                self.add_log('✅ Başarılı!')
+                
+        except Exception as e:
+            self.update_status(f'HATA: {e}')
+            self.add_log(f'HATA: {e}')
         
         finally:
-            self.print_btn.disabled = False
+            Clock.schedule_once(lambda dt: setattr(self.print_btn, 'disabled', False), 0)
+    
+    def update_status(self, text):
+        """Update status label"""
+        Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', text), 0)
+    
+    def update_progress(self, value):
+        """Update progress bar"""
+        self.progress_bar.value = value
 
 if __name__ == '__main__':
     PrinterApp().run()
