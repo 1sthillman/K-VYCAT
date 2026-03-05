@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 MXW01 Printer - Kivy Mobile App
-Python kodundaki AYNI protokol
+Android native Bluetooth kullanır
 """
 
 from kivy.app import App
@@ -12,8 +12,6 @@ from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
 from kivy.uix.image import Image as KivyImage
-from kivy.uix.slider import Slider
-from kivy.uix.spinner import Spinner
 from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.gridlayout import GridLayout
@@ -22,30 +20,22 @@ from kivy.clock import Clock
 from kivy.metrics import dp
 from kivy.core.image import Image as CoreImage
 
-import asyncio
 import io
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance
-from enum import Enum
+from PIL import Image, ImageDraw, ImageFont
 
 try:
-    from bleak import BleakClient, BleakScanner
-    BLE_AVAILABLE = True
+    from jnius import autoclass
+    BluetoothAdapter = autoclass('android.bluetooth.BluetoothAdapter')
+    BluetoothDevice = autoclass('android.bluetooth.BluetoothDevice')
+    BluetoothSocket = autoclass('android.bluetooth.BluetoothSocket')
+    UUID = autoclass('java.util.UUID')
+    ANDROID = True
 except:
-    BLE_AVAILABLE = False
-
-try:
-    import qrcode
-    HAS_QR = True
-except:
-    HAS_QR = False
+    ANDROID = False
 
 Window.size = (360, 640)
 
-# Printer Protocol - Python kodundan AYNI
 class PrinterProtocol:
-    CMD_UUID = "0000ae01-0000-1000-8000-00805f9b34fb"
-    DATA_UUID = "0000ae03-0000-1000-8000-00805f9b34fb"
-    
     CMD_START = bytes.fromhex("2221A70000000000")
     CMD_CONFIG1 = bytes.fromhex("2221B10001000000FF")
     CMD_CONFIG2 = bytes.fromhex("2221A10001000000FF")
@@ -101,14 +91,12 @@ class HomeScreen(Screen):
         
         layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
         
-        # Header
         title = Label(text='MXW01 Yazıcı', font_size='24sp', size_hint_y=0.1, bold=True)
         layout.add_widget(title)
         
         self.status_label = Label(text='Bağlı Değil', font_size='14sp', size_hint_y=0.05)
         layout.add_widget(self.status_label)
         
-        # Connection
         conn_box = BoxLayout(orientation='vertical', size_hint_y=0.15, spacing=dp(5))
         self.printer_name = Label(text='MXW01', font_size='16sp')
         self.printer_mac = Label(text='48:0F:57:3E:60:77', font_size='12sp')
@@ -120,29 +108,19 @@ class HomeScreen(Screen):
         conn_box.add_widget(connect_btn)
         layout.add_widget(conn_box)
         
-        # Menu
         menu = GridLayout(cols=2, spacing=dp(15), size_hint_y=0.5)
         
         text_btn = Button(text='📝\nMetin', font_size='16sp')
         text_btn.bind(on_press=lambda x: setattr(self.manager, 'current', 'text'))
-        
-        image_btn = Button(text='🖼️\nGörsel', font_size='16sp')
-        image_btn.bind(on_press=lambda x: setattr(self.manager, 'current', 'image'))
-        
-        qr_btn = Button(text='📱\nQR Kod', font_size='16sp')
-        qr_btn.bind(on_press=lambda x: setattr(self.manager, 'current', 'qr'))
+        menu.add_widget(text_btn)
         
         settings_btn = Button(text='⚙️\nAyarlar', font_size='16sp')
         settings_btn.bind(on_press=lambda x: setattr(self.manager, 'current', 'settings'))
-        
-        menu.add_widget(text_btn)
-        menu.add_widget(image_btn)
-        menu.add_widget(qr_btn)
         menu.add_widget(settings_btn)
         
         layout.add_widget(menu)
         
-        footer = Label(text='v1.0 - Kivy', size_hint_y=0.05, font_size='12sp')
+        footer = Label(text='v1.0 - Android Native', size_hint_y=0.05, font_size='12sp')
         layout.add_widget(footer)
         
         self.add_widget(layout)
@@ -153,7 +131,6 @@ class TextScreen(Screen):
         
         layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
         
-        # Header
         header = BoxLayout(size_hint_y=0.08)
         back_btn = Button(text='← Geri', size_hint_x=0.3)
         back_btn.bind(on_press=lambda x: setattr(self.manager, 'current', 'home'))
@@ -161,15 +138,12 @@ class TextScreen(Screen):
         header.add_widget(Label(text='Metin Yazdır', font_size='18sp'))
         layout.add_widget(header)
         
-        # Input
         self.text_input = TextInput(hint_text='Metninizi yazın...', multiline=True, size_hint_y=0.4)
         layout.add_widget(self.text_input)
         
-        # Preview
         self.preview_image = KivyImage(size_hint_y=0.4)
         layout.add_widget(self.preview_image)
         
-        # Buttons
         btn_box = BoxLayout(size_hint_y=0.12, spacing=dp(10))
         
         preview_btn = Button(text='Önizleme')
@@ -235,45 +209,35 @@ class BluetoothScreen(Screen):
         layout.add_widget(self.scan_btn)
         
         self.add_widget(layout)
-        self.devices = []
     
     def start_scan(self, instance):
-        self.scan_btn.disabled = True
-        self.scan_btn.text = 'Taranıyor...'
-        self.status_label.text = 'Bluetooth cihazları aranıyor...'
-        self.device_list.clear_widgets()
+        if not ANDROID:
+            self.status_label.text = 'Android gerekli'
+            return
         
-        Clock.schedule_once(lambda dt: self.scan_devices(), 0.1)
-    
-    def scan_devices(self):
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            devices = loop.run_until_complete(BleakScanner.discover(timeout=5.0))
-            loop.close()
+            adapter = BluetoothAdapter.getDefaultAdapter()
+            if not adapter:
+                self.status_label.text = 'Bluetooth yok'
+                return
             
-            self.devices = [(d.name or "Unknown", d.address) for d in devices]
-            self.display_devices()
-        except Exception as e:
-            self.status_label.text = f'Hata: {e}'
-            self.scan_btn.disabled = False
-            self.scan_btn.text = 'Tekrar Tara'
-    
-    def display_devices(self):
-        self.device_list.clear_widgets()
-        
-        if not self.devices:
-            self.status_label.text = 'Cihaz bulunamadı'
-        else:
-            self.status_label.text = f'{len(self.devices)} cihaz bulundu'
+            devices = adapter.getBondedDevices().toArray()
+            self.device_list.clear_widgets()
             
-            for name, address in self.devices:
+            if not devices:
+                self.status_label.text = 'Eşleşmiş cihaz yok'
+                return
+            
+            self.status_label.text = f'{len(devices)} cihaz bulundu'
+            
+            for device in devices:
+                name = device.getName()
+                address = device.getAddress()
                 btn = Button(text=f'{name}\n{address}', size_hint_y=None, height=dp(70))
                 btn.bind(on_press=lambda x, n=name, a=address: self.select_device(n, a))
                 self.device_list.add_widget(btn)
-        
-        self.scan_btn.disabled = False
-        self.scan_btn.text = 'Tekrar Tara'
+        except Exception as e:
+            self.status_label.text = f'Hata: {e}'
     
     def select_device(self, name, address):
         app = App.get_running_app()
@@ -286,100 +250,6 @@ class BluetoothScreen(Screen):
         home.status_label.text = 'Bağlandı'
         
         self.manager.current = 'home'
-
-class QRScreen(Screen):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        
-        layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
-        
-        header = BoxLayout(size_hint_y=0.08)
-        back_btn = Button(text='← Geri', size_hint_x=0.3)
-        back_btn.bind(on_press=lambda x: setattr(self.manager, 'current', 'home'))
-        header.add_widget(back_btn)
-        header.add_widget(Label(text='QR Kod', font_size='18sp'))
-        layout.add_widget(header)
-        
-        self.qr_input = TextInput(hint_text='https://ornek.com', multiline=False, size_hint_y=0.1)
-        layout.add_widget(self.qr_input)
-        
-        self.preview_image = KivyImage(size_hint_y=0.5)
-        layout.add_widget(self.preview_image)
-        
-        btn_box = BoxLayout(size_hint_y=0.12, spacing=dp(10))
-        
-        preview_btn = Button(text='Önizleme')
-        preview_btn.bind(on_press=self.generate_preview)
-        
-        print_btn = Button(text='Yazdır')
-        print_btn.bind(on_press=self.print_qr)
-        
-        btn_box.add_widget(preview_btn)
-        btn_box.add_widget(print_btn)
-        layout.add_widget(btn_box)
-        
-        self.add_widget(layout)
-        self.current_qr = None
-    
-    def generate_preview(self, instance):
-        if not HAS_QR:
-            return
-        
-        data = self.qr_input.text.strip()
-        if not data:
-            return
-        
-        try:
-            qr = qrcode.QRCode(box_size=10, border=4)
-            qr.add_data(data)
-            qr.make(fit=True)
-            img = qr.make_image(fill_color="black", back_color="white")
-            
-            self.current_qr = img.convert('RGB')
-            
-            buf = io.BytesIO()
-            self.current_qr.save(buf, format='PNG')
-            buf.seek(0)
-            core_img = CoreImage(buf, ext='png')
-            self.preview_image.texture = core_img.texture
-        except Exception as e:
-            print(f"QR error: {e}")
-    
-    def print_qr(self, instance):
-        if not self.current_qr:
-            self.generate_preview(instance)
-        
-        if self.current_qr:
-            canvas = Image.new('RGB', (384, self.current_qr.height + 20), 'white')
-            x = (384 - self.current_qr.width) // 2
-            canvas.paste(self.current_qr, (x, 10))
-            
-            app = App.get_running_app()
-            app.start_print(canvas)
-
-class ImageScreen(Screen):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        
-        layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
-        
-        header = BoxLayout(size_hint_y=0.08)
-        back_btn = Button(text='← Geri', size_hint_x=0.3)
-        back_btn.bind(on_press=lambda x: setattr(self.manager, 'current', 'home'))
-        header.add_widget(back_btn)
-        header.add_widget(Label(text='Görsel', font_size='18sp'))
-        layout.add_widget(header)
-        
-        load_btn = Button(text='Görsel Yükle', size_hint_y=0.08)
-        layout.add_widget(load_btn)
-        
-        self.preview_image = KivyImage(size_hint_y=0.6)
-        layout.add_widget(self.preview_image)
-        
-        print_btn = Button(text='Yazdır', size_hint_y=0.12)
-        layout.add_widget(print_btn)
-        
-        self.add_widget(layout)
 
 class SettingsScreen(Screen):
     def __init__(self, **kwargs):
@@ -394,7 +264,7 @@ class SettingsScreen(Screen):
         header.add_widget(Label(text='Ayarlar', font_size='18sp'))
         layout.add_widget(header)
         
-        info = Label(text='MXW01 Printer v1.0\nKivy ile geliştirildi', size_hint_y=0.8)
+        info = Label(text='MXW01 Printer v1.0\nAndroid Native Bluetooth', size_hint_y=0.8)
         layout.add_widget(info)
         
         self.add_widget(layout)
@@ -404,64 +274,65 @@ class MXWPrinterApp(App):
         super().__init__(**kwargs)
         self.printer_name = "MXW01"
         self.printer_address = "48:0F:57:3E:60:77"
+        self.socket = None
     
     def build(self):
         sm = ScreenManager()
         sm.add_widget(HomeScreen(name='home'))
         sm.add_widget(TextScreen(name='text'))
         sm.add_widget(BluetoothScreen(name='bluetooth'))
-        sm.add_widget(QRScreen(name='qr'))
-        sm.add_widget(ImageScreen(name='image'))
         sm.add_widget(SettingsScreen(name='settings'))
         return sm
     
     def start_print(self, image: Image.Image):
-        if not BLE_AVAILABLE:
+        if not ANDROID:
+            print("Android gerekli")
             return
         
-        Clock.schedule_once(lambda dt: self.print_async(image), 0.1)
-    
-    def print_async(self, image):
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(self.print_image(image))
-            loop.close()
-        except Exception as e:
-            print(f"Print error: {e}")
-    
-    async def print_image(self, image: Image.Image):
-        device = await BleakScanner.find_device_by_address(self.printer_address, timeout=10.0)
-        if not device:
-            return
-        
-        async with BleakClient(device) as client:
+            adapter = BluetoothAdapter.getDefaultAdapter()
+            device = adapter.getRemoteDevice(self.printer_address)
+            
+            uuid = UUID.fromString("00001101-0000-1000-8000-00805f9b34fb")
+            self.socket = device.createRfcommSocketToServiceRecord(uuid)
+            self.socket.connect()
+            
+            output = self.socket.getOutputStream()
+            
             data = PrinterProtocol.encode_lsb(image)
             rows = image.height
             bytes_per_row = 384 // 8
             
-            await client.write_gatt_char(PrinterProtocol.CMD_UUID, PrinterProtocol.CMD_START, response=False)
-            await asyncio.sleep(0.5)
+            output.write(PrinterProtocol.CMD_START)
+            output.flush()
             
-            await client.write_gatt_char(PrinterProtocol.CMD_UUID, PrinterProtocol.CMD_CONFIG1, response=False)
-            await asyncio.sleep(0.5)
+            output.write(PrinterProtocol.CMD_CONFIG1)
+            output.flush()
             
-            await client.write_gatt_char(PrinterProtocol.CMD_UUID, PrinterProtocol.CMD_CONFIG2, response=False)
-            await asyncio.sleep(0.5)
+            output.write(PrinterProtocol.CMD_CONFIG2)
+            output.flush()
             
-            await client.write_gatt_char(PrinterProtocol.CMD_UUID, PrinterProtocol.CMD_HEAT, response=False)
-            await asyncio.sleep(1.0)
+            output.write(PrinterProtocol.CMD_HEAT)
+            output.flush()
             
-            await client.write_gatt_char(PrinterProtocol.CMD_UUID, PrinterProtocol.CMD_HEADER, response=False)
-            await asyncio.sleep(1.0)
+            output.write(PrinterProtocol.CMD_HEADER)
+            output.flush()
             
             for i in range(rows):
                 row = data[i * bytes_per_row:(i + 1) * bytes_per_row]
-                await client.write_gatt_char(PrinterProtocol.DATA_UUID, row, response=False)
-                await asyncio.sleep(0.05)
+                output.write(row)
+                output.flush()
             
-            await client.write_gatt_char(PrinterProtocol.CMD_UUID, PrinterProtocol.CMD_END, response=False)
-            await asyncio.sleep(2.0)
+            output.write(PrinterProtocol.CMD_END)
+            output.flush()
+            
+            self.socket.close()
+            print("Yazdırma tamamlandı!")
+            
+        except Exception as e:
+            print(f"Print error: {e}")
+            if self.socket:
+                self.socket.close()
 
 if __name__ == '__main__':
     MXWPrinterApp().run()
