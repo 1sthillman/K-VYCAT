@@ -1,0 +1,105 @@
+name: Build Kivy APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential git python3 python3-dev \
+          ffmpeg libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
+          libportmidi-dev libswscale-dev libavformat-dev libavcodec-dev zlib1g-dev \
+          libgstreamer1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+          openjdk-11-jdk unzip zip autoconf libtool pkg-config
+    
+    - name: Setup Android SDK
+      run: |
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        unzip -q commandlinetools-linux-9477386_latest.zip -d android-sdk
+        mkdir -p android-sdk/cmdline-tools/latest
+        mv android-sdk/cmdline-tools/bin android-sdk/cmdline-tools/lib android-sdk/cmdline-tools/latest/ 2>/dev/null || true
+        echo "ANDROID_SDK_ROOT=$PWD/android-sdk" >> $GITHUB_ENV
+        echo "ANDROID_HOME=$PWD/android-sdk" >> $GITHUB_ENV
+    
+    - name: Accept Android licenses
+      run: |
+        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-31" "build-tools;31.0.0"
+    
+    - name: Setup Android NDK r25b
+      run: |
+        wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
+        unzip -q android-ndk-r25b-linux.zip
+        echo "ANDROID_NDK_HOME=$PWD/android-ndk-r25b" >> $GITHUB_ENV
+    
+    - name: Install Python dependencies
+      run: |
+        pip install --upgrade pip setuptools wheel
+        pip install cython==0.29.36
+        pip install buildozer
+    
+    - name: Cache Buildozer
+      uses: actions/cache@v3
+      with:
+        path: |
+          .buildozer
+        key: buildozer-pyjnius-${{ hashFiles('buildozer.spec') }}
+    
+    - name: Build APK with Buildozer
+      run: |
+        buildozer -v android debug
+      env:
+        ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
+        ANDROID_HOME: ${{ env.ANDROID_HOME }}
+        ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
+    
+    - name: Upload APK
+      uses: actions/upload-artifact@v3
+      with:
+        name: kivy-apk
+        path: bin/*.apk
+    
+    - name: Create Release
+      if: github.event_name == 'push'
+      uses: ncipollo/release-action@v1
+      with:
+        tag: kivy-v1.0.${{ github.run_number }}
+        name: Kivy APK v1.0.${{ github.run_number }}
+        body: |
+          ## MXW01 Printer - Kivy/Python APK
+          
+          Python printer_app.py'nin Android versiyonu.
+          Android native Bluetooth API kullanır (pyjnius).
+          
+          ### Kurulum
+          1. APK'yı indir
+          2. "Bilinmeyen Kaynaklardan Yükleme" izni ver
+          3. APK'yı yükle
+          4. Bluetooth ve Konum izinleri ver
+          
+          ### Özellikler
+          - Android native Bluetooth (pyjnius)
+          - Kivy UI
+          - Masaüstü uygulaması ile aynı protokol
+        artifacts: "bin/*.apk"
+        token: ${{ secrets.GITHUB_TOKEN }}
+        allowUpdates: true
